@@ -1,0 +1,18 @@
+{
+  "name": "agy-plugin-cc",
+  "version": "0.1.0",
+  "description": "Claude Code marketplace for the Antigravity companion plugin.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check plugins/agy/scripts/agy-companion.mjs",
+    "validate": "claude plugin validate --strict . && claude plugin validate --strict ./plugins/agy",
+    "setup": "node plugins/agy/scripts/agy-companion.mjs setup",
+    "setup:json": "node plugins/agy/scripts/agy-companion.mjs setup --json"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  }
+}

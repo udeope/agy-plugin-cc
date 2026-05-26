@@ -1,0 +1,30 @@
+{
+  "name": "agy-plugin-cc",
+  "owner": {
+    "name": "Eduard S."
+  },
+  "metadata": {
+    "description": "Claude Code marketplace for the Antigravity companion plugin.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "agy",
+      "displayName": "Antigravity Companion",
+      "description": "Use the local Antigravity CLI from Claude Code to review code or delegate rescue tasks.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Eduard S."
+      },
+      "source": "./plugins/agy",
+      "category": "developer-tools",
+      "tags": [
+        "antigravity",
+        "review",
+        "delegation"
+      ],
+      "repository": "https://github.com/udeope/agy-plugin-cc",
+      "license": "Apache-2.0"
+    }
+  ]
+}

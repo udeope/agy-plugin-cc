@@ -1,0 +1,18 @@
+{
+  "name": "agy",
+  "displayName": "Antigravity Companion",
+  "version": "0.1.0",
+  "description": "Use the local Antigravity CLI from Claude Code to review code or delegate rescue tasks.",
+  "author": {
+    "name": "Eduard S."
+  },
+  "homepage": "https://github.com/udeope/agy-plugin-cc#readme",
+  "repository": "https://github.com/udeope/agy-plugin-cc",
+  "license": "Apache-2.0",
+  "keywords": [
+    "antigravity",
+    "review",
+    "rescue",
+    "cli"
+  ]
+}
