@@ -1,0 +1,38 @@
+{
+  "name": "agy",
+  "version": "0.1.0",
+  "description": "Delegate review and rescue workflows to the local Antigravity CLI.",
+  "author": {
+    "name": "Eduard S.",
+    "url": "https://github.com/udeope"
+  },
+  "homepage": "https://github.com/udeope/agy-plugin-cc#readme",
+  "repository": "https://github.com/udeope/agy-plugin-cc",
+  "license": "Apache-2.0",
+  "keywords": [
+    "antigravity",
+    "review",
+    "rescue",
+    "cli",
+    "delegation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Antigravity Companion",
+    "shortDescription": "Delegate reviews and rescue tasks to agy.",
+    "longDescription": "Use the local Antigravity CLI from Codex to review code, run adversarial reviews, or delegate rescue tasks through a shared Node.js companion runtime.",
+    "developerName": "Eduard S.",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/udeope/agy-plugin-cc",
+    "defaultPrompt": [
+      "Use agy to review my current changes.",
+      "Ask agy to run an adversarial review.",
+      "Delegate this rescue task to agy."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
