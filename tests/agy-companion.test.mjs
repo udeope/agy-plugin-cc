@@ -3,10 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import test from 'node:test';
+import test, { after } from 'node:test';
 
 import {
   buildReviewContext,
+  jobDir,
+  logDir,
   normalizeTrustedWorkspaces,
   parseFlags,
   parseInvocationArgs,
@@ -15,6 +17,11 @@ import {
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const companion = path.join(repoRoot, 'plugins', 'agy', 'scripts', 'agy-companion.mjs');
+const stopGateHook = path.join(repoRoot, 'plugins', 'agy', 'scripts', 'stop-review-gate-hook.mjs');
+
+after(() => {
+  fs.rmSync(path.join(repoRoot, '.tmp'), { recursive: true, force: true });
+});
 
 test('parses Claude raw argument string and normal argv mode', () => {
   assert.deepEqual(parseInvocationArgs(['--background --base main "extra note"']), [
@@ -142,6 +149,22 @@ test('dangerously-skip-permissions is only forwarded when explicitly provided', 
   assert.match(dangerous.stdout, /dangerously-skip-permissions/);
 });
 
+test('agy invocations use companion-owned log files', () => {
+  const workspace = makeTempDir();
+  const home = makeHomeWithTrustedWorkspace(workspace);
+  const fakeBin = makeFakeAgyBin();
+  const data = makeTempDir();
+
+  const result = runCompanion(['rescue', 'diagnose issue'], {
+    cwd: workspace,
+    env: { HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, AGY_COMPANION_DATA: data },
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /\[--log-file\]/);
+  assert.match(result.stdout, new RegExp(escapeRegExp(path.join(data, 'logs'))));
+});
+
 test('background jobs can be listed, read, and cancelled when already finished', () => {
   const workspace = makeTempDir();
   execFileSync('git', ['init'], { cwd: workspace, stdio: 'ignore' });
@@ -167,6 +190,164 @@ test('background jobs can be listed, read, and cancelled when already finished',
   assert.equal(cancel.status, 0);
   assert.match(cancel.stdout, /is not running|cancelled/);
 });
+
+test('AGY_COMPANION_DATA takes precedence over CLAUDE_PLUGIN_DATA for job storage', () => {
+  const workspace = makeTempDir();
+  const agyData = makeTempDir();
+  const claudeData = makeTempDir();
+  const oldCwd = process.cwd();
+  const oldAgyData = process.env.AGY_COMPANION_DATA;
+  const oldClaudeData = process.env.CLAUDE_PLUGIN_DATA;
+
+  process.chdir(workspace);
+  process.env.AGY_COMPANION_DATA = agyData;
+  process.env.CLAUDE_PLUGIN_DATA = claudeData;
+  try {
+    assert.match(jobDir(), new RegExp(escapeRegExp(path.join(agyData, 'jobs'))));
+    assert.match(logDir(), new RegExp(escapeRegExp(path.join(agyData, 'logs'))));
+    assert.doesNotMatch(jobDir(), new RegExp(escapeRegExp(path.join(claudeData, 'jobs'))));
+  } finally {
+    process.chdir(oldCwd);
+    restoreEnv('AGY_COMPANION_DATA', oldAgyData);
+    restoreEnv('CLAUDE_PLUGIN_DATA', oldClaudeData);
+  }
+});
+
+test('Codex plugin and marketplace manifests expose the agy plugin', () => {
+  const codexManifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'plugins', 'agy', '.codex-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(codexManifest.name, 'agy');
+  assert.equal(codexManifest.skills, './skills/');
+  assert.equal(codexManifest.interface.displayName, 'Antigravity Companion');
+  assert.ok(codexManifest.interface.capabilities.includes('Read'));
+  assert.ok(codexManifest.interface.capabilities.includes('Write'));
+
+  const marketplace = JSON.parse(fs.readFileSync(path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'), 'utf8'));
+  const agy = marketplace.plugins.find((plugin) => plugin.name === 'agy');
+  assert.ok(agy);
+  assert.equal(agy.source.path, './plugins/agy');
+  assert.equal(agy.policy.installation, 'AVAILABLE');
+  assert.equal(agy.policy.authentication, 'ON_USE');
+});
+
+test('OpenCode command files delegate to agy-companion', () => {
+  const commandDir = path.join(repoRoot, '.opencode', 'commands');
+  const expected = [
+    'agy-setup.md',
+    'agy-review.md',
+    'agy-adversarial-review.md',
+    'agy-rescue.md',
+    'agy-status.md',
+    'agy-result.md',
+    'agy-cancel.md',
+  ];
+
+  for (const file of expected) {
+    const body = fs.readFileSync(path.join(commandDir, file), 'utf8');
+    assert.match(body, /^---\n[\s\S]*description:/);
+    assert.match(body, /agy-companion /);
+    assert.match(body, /\$ARGUMENTS/);
+  }
+});
+
+test('skills declare names and descriptions for Codex and OpenCode discovery', () => {
+  for (const file of [
+    path.join(repoRoot, 'plugins', 'agy', 'skills', 'agy-cli-runtime', 'SKILL.md'),
+    path.join(repoRoot, '.opencode', 'skills', 'agy-cli-runtime', 'SKILL.md'),
+  ]) {
+    const body = fs.readFileSync(file, 'utf8');
+    assert.match(body, /^---\n[\s\S]*name: agy-cli-runtime/);
+    assert.match(body, /^---\n[\s\S]*description:/);
+  }
+});
+
+test('stop-review-gate hook is a no-op unless the gate is enabled', () => {
+  const ws = makeGitWorkspace({ dirty: true });
+  const result = runHook({ cwd: ws }, {});
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), '');
+});
+
+test('stop-review-gate hook blocks when agy returns BLOCK on a dirty tree', () => {
+  const ws = makeGitWorkspace({ dirty: true });
+  const fakeBin = makeVerdictAgyBin('BLOCK: missing tests for f.txt');
+  const data = makeTempDir();
+  const result = runHook({ cwd: ws, last_assistant_message: 'I edited f.txt' }, {
+    AGY_STOP_REVIEW_GATE: '1',
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    AGY_COMPANION_DATA: data,
+  });
+  assert.equal(result.status, 0);
+  const decision = JSON.parse(result.stdout);
+  assert.equal(decision.decision, 'block');
+  assert.match(decision.reason, /missing tests for f\.txt/);
+});
+
+test('stop-review-gate hook allows when agy returns ALLOW', () => {
+  const ws = makeGitWorkspace({ dirty: true });
+  const fakeBin = makeVerdictAgyBin('ALLOW: looks fine');
+  const data = makeTempDir();
+  const result = runHook({ cwd: ws }, {
+    AGY_STOP_REVIEW_GATE: '1',
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    AGY_COMPANION_DATA: data,
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), '');
+});
+
+test('stop-review-gate hook skips clean trees without invoking agy', () => {
+  const ws = makeGitWorkspace({ dirty: false });
+  const fakeBin = makeVerdictAgyBin('BLOCK: should never run on a clean tree');
+  const result = runHook({ cwd: ws }, {
+    AGY_STOP_REVIEW_GATE: '1',
+    PATH: `${fakeBin}:${process.env.PATH}`,
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), '');
+});
+
+test('stop-review-gate hook does not recurse when stop_hook_active is set', () => {
+  const ws = makeGitWorkspace({ dirty: true });
+  const fakeBin = makeVerdictAgyBin('BLOCK: x');
+  const result = runHook({ cwd: ws, stop_hook_active: true }, {
+    AGY_STOP_REVIEW_GATE: '1',
+    PATH: `${fakeBin}:${process.env.PATH}`,
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), '');
+});
+
+function runHook(input, env = {}) {
+  return spawnSync(process.execPath, [stopGateHook], {
+    input: JSON.stringify(input),
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+  });
+}
+
+function makeGitWorkspace({ dirty = false } = {}) {
+  const dir = makeTempDir();
+  execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: dir });
+  fs.writeFileSync(path.join(dir, 'f.txt'), 'base\n');
+  execFileSync('git', ['add', 'f.txt'], { cwd: dir });
+  execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' });
+  if (dirty) {
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'changed\n');
+  }
+  return dir;
+}
+
+function makeVerdictAgyBin(verdict) {
+  const dir = makeTempDir();
+  fs.writeFileSync(
+    path.join(dir, 'agy'),
+    `#!/usr/bin/env sh\necho "${verdict}"\n`,
+    { mode: 0o755 },
+  );
+  return dir;
+}
 
 function runCompanion(args, { cwd, env = {} }) {
   return spawnSync(process.execPath, [companion, ...args], {
@@ -202,4 +383,16 @@ function makeFakeAgyBin() {
     { mode: 0o755 },
   );
   return dir;
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
