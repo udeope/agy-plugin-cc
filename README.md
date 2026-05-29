@@ -1,5 +1,7 @@
 # agy-plugin-cc
 
+[![CI](https://github.com/udeope/agy-plugin-cc/actions/workflows/ci.yml/badge.svg)](https://github.com/udeope/agy-plugin-cc/actions/workflows/ci.yml)
+
 Multi-client companion plugin for `agy`, delegating code review and rescue workflows to the local Antigravity CLI from Claude Code, Codex, and OpenCode.
 
 ## Install for Claude Code
