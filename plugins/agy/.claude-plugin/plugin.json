@@ -1,7 +1,7 @@
 {
   "name": "agy",
   "displayName": "Antigravity Companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Use the local Antigravity CLI from Claude Code to review code or delegate rescue tasks.",
   "author": {
     "name": "Eduard S."
