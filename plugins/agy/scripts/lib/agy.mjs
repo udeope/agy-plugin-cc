@@ -9,15 +9,32 @@ import { spawn, spawnSync } from 'node:child_process';
 
 import { logDir } from './paths.mjs';
 
-const SETTINGS_PATH = path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
+// Settings path is overridable (AGY_SETTINGS_PATH) for non-default Antigravity
+// installs and for tests; otherwise defaults to the standard CLI location.
+const SETTINGS_PATH = process.env.AGY_SETTINGS_PATH
+  ? path.resolve(process.env.AGY_SETTINGS_PATH)
+  : path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
 const WRITE_WORDS = /\b(fix|apply|change|modify|edit|write|implement|update|patch|repair|refactor|create|delete|remove|rename)\b/i;
+const INSTALL_HINT = 'agy (Antigravity CLI) was not found in PATH. Install it and run /agy:setup. See https://github.com/udeope/agy-plugin-cc#requirements';
 
 function findBinary(name) {
-  const result = spawnSync('which', [name], { encoding: 'utf8' });
+  const locator = process.platform === 'win32' ? 'where' : 'which';
+  const result = spawnSync(locator, [name], { encoding: 'utf8' });
   if (result.status === 0) {
-    return { ok: true, path: result.stdout.trim() };
+    // `where` can list several matches (one per line); keep the first.
+    return { ok: true, path: (result.stdout || '').trim().split(/\r?\n/)[0].trim() };
   }
-  return { ok: false, path: null, error: result.stderr.trim() || `${name} not found in PATH` };
+  return { ok: false, path: null, error: (result.stderr || '').trim() || `${name} not found in PATH` };
+}
+
+// Fail fast with an actionable message instead of a cryptic spawn ENOENT when
+// a command would otherwise try to launch agy without it being installed.
+function ensureBinaryOrThrow() {
+  const binary = findBinary('agy');
+  if (!binary.ok) {
+    throw new Error(INSTALL_HINT);
+  }
+  return binary;
 }
 
 function readSettings() {
@@ -65,9 +82,11 @@ function runAuthCheck() {
     timeout: 30000,
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  // Require a standalone OK, but never treat an explicit "NOT OK" as success.
+  const looksOk = /\bOK\b/i.test(output) && !/\bNOT\s+OK\b/i.test(output);
   return {
     status: result.status,
-    ok: result.status === 0 && /\bOK\b/.test(output),
+    ok: result.status === 0 && looksOk,
     output,
     error: result.error?.message || (result.status === 0 ? null : `exit ${result.status}`),
   };
@@ -114,9 +133,11 @@ function runForeground(args) {
 }
 
 export {
+  INSTALL_HINT,
   SETTINGS_PATH,
   WRITE_WORDS,
   assertTrustedForWrite,
+  ensureBinaryOrThrow,
   findBinary,
   normalizeTrustedWorkspaces,
   readSettings,

@@ -6,9 +6,11 @@ import fs from 'node:fs';
 
 import { parseFlags, parseInvocationArgs, shellSplit } from './lib/args.mjs';
 import {
+  INSTALL_HINT,
   SETTINGS_PATH,
   WRITE_WORDS,
   assertTrustedForWrite,
+  ensureBinaryOrThrow,
   findBinary,
   normalizeTrustedWorkspaces,
   readSettings,
@@ -17,7 +19,15 @@ import {
   withLogFile,
 } from './lib/agy.mjs';
 import { buildReviewContext } from './lib/git.mjs';
-import { findJob, isRunning, listJobs, printJobStatus, startJob } from './lib/jobs.mjs';
+import {
+  findJob,
+  isRunning,
+  listJobs,
+  printJobStatus,
+  pruneJobs,
+  pruneLogs,
+  startJob,
+} from './lib/jobs.mjs';
 import { jobDir, logDir } from './lib/paths.mjs';
 import { buildReviewPrompt } from './lib/prompts.mjs';
 
@@ -48,6 +58,8 @@ async function main() {
       return result(args);
     case 'cancel':
       return cancel(args);
+    case 'prune':
+      return prune(args);
     case 'help':
     default:
       return help();
@@ -92,10 +104,14 @@ function setup(args) {
   console.log(`trusted workspaces: ${settings.trustedWorkspaces.length}`);
   console.log(`auth: ${payload.auth.status}${payload.auth.error ? ` (${payload.auth.error})` : ''}`);
   console.log(`ready: ${ready}`);
+  if (!binary.ok) {
+    console.log(INSTALL_HINT);
+  }
 }
 
 async function runReview(args, adversarial) {
   const flags = parseFlags(args);
+  ensureBinaryOrThrow();
   const context = buildReviewContext(flags.base);
   const extra = flags.positional.join(' ').trim();
   const prompt = buildReviewPrompt({ adversarial, context, extra });
@@ -110,12 +126,16 @@ async function runReview(args, adversarial) {
 
 async function runRescue(args) {
   const flags = parseFlags(args);
+  ensureBinaryOrThrow();
   const task = flags.positional.join(' ').trim();
   if (!task && !flags.continueConversation && !flags.conversation) {
     throw new Error('rescue requires a task, --continue, or --conversation <id>');
   }
 
-  const wantsWrite = flags.write || WRITE_WORDS.test(task);
+  // --read-only forces a sandboxed run and wins over both --write and the
+  // WRITE_WORDS heuristic, which can false-positive on phrases like
+  // "write a summary" or "update the docstring".
+  const wantsWrite = !flags.readOnly && (flags.write || WRITE_WORDS.test(task));
   if (wantsWrite) {
     assertTrustedForWrite(process.cwd());
   }
@@ -173,8 +193,31 @@ function cancel(args) {
   console.log(`cancelled ${meta.id}`);
 }
 
+function prune(args) {
+  parseFlags(args);
+  const jobs = pruneJobs();
+  const logs = pruneLogs();
+  console.log(`pruned ${jobs.removed} finished job(s) and ${logs.removed} log file(s)`);
+}
+
 function help() {
-  console.log('usage: agy-companion.mjs <setup|review|adversarial-review|rescue|status|result|cancel> [args]');
+  console.log(`usage: agy-companion.mjs <action> [args]
+
+actions:
+  setup [--json] [--auth-check]            check agy binary, settings, and (optionally) auth
+  review [--background] [--base <ref>]     read-only review of the working tree
+  adversarial-review [--background] ...    stricter, skeptical review
+  rescue [--background] [--write|--read-only] [--continue] [--conversation <id>] <task>
+                                           delegate a task to agy (sandboxed unless --write)
+  status [job-id]                          list background jobs, or one job's state
+  result <job-id>                          print a finished job's output
+  cancel <job-id>                          stop a running background job
+  prune                                    remove finished jobs and logs past the retention window
+
+env:
+  AGY_SETTINGS_PATH                 override the antigravity-cli settings.json path
+  AGY_COMPANION_DATA                override where jobs and logs are stored
+  AGY_COMPANION_RETENTION_DAYS      days to keep finished jobs/logs (default 7; <=0 disables pruning)`);
 }
 
 export {
@@ -185,6 +228,9 @@ export {
   normalizeTrustedWorkspaces,
   parseFlags,
   parseInvocationArgs,
+  pruneJobs,
+  pruneLogs,
   shellSplit,
 };
+export { redactArgs } from './lib/jobs.mjs';
 export { buildReviewPrompt } from './lib/prompts.mjs';

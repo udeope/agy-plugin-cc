@@ -53,10 +53,11 @@ The OpenCode integration provides:
 - `/agy:setup [--json] [--auth-check]`
 - `/agy:review [--background] [--base <ref>] [extra instructions]`
 - `/agy:adversarial-review [--background] [--base <ref>] [extra instructions]`
-- `/agy:rescue [--background] [--wait] [--write] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>`
+- `/agy:rescue [--background] [--wait] [--write|--read-only] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>`
 - `/agy:status [job-id]`
 - `/agy:result <job-id>`
 - `/agy:cancel <job-id>`
+- `/agy:prune`
 
 For Codex and OpenCode, use the same action names through `agy-companion`:
 
@@ -68,6 +69,7 @@ agy-companion rescue --write "fix the failing test"
 agy-companion status
 agy-companion result <job-id>
 agy-companion cancel <job-id>
+agy-companion prune
 ```
 
 ## Requirements
@@ -75,8 +77,8 @@ agy-companion cancel <job-id>
 - Claude Code with plugin marketplace support.
 - Codex with plugin support, for Codex usage.
 - OpenCode with command/agent/skill discovery configured, for OpenCode usage.
-- A working local `agy` executable in `PATH`.
-- Antigravity CLI settings at `~/.gemini/antigravity-cli/settings.json`.
+- A working local `agy` executable in `PATH`. If it is missing, `setup`, `review`, and `rescue` report an install hint instead of a raw spawn error.
+- Antigravity CLI settings at `~/.gemini/antigravity-cli/settings.json`, or a custom path via `AGY_SETTINGS_PATH`.
 
 Run:
 
@@ -97,7 +99,7 @@ agy --print "Reply with only OK" --sandbox --print-timeout 20s
 
 Read-only review and rescue tasks run with `agy --sandbox`. Write access is not enabled by default.
 
-`/agy:rescue` enables write mode only when the user explicitly asks for it, either with `--write` or natural language such as "fix", "apply changes", "modify files", or "implement".
+`/agy:rescue` enables write mode only when the user explicitly asks for it, either with `--write` or natural language such as "fix", "apply changes", "modify files", or "implement". Because that heuristic can false-positive on read-only phrasing (for example "write a summary"), `--read-only` forces a sandboxed run and overrides both `--write` and the write-word match.
 
 Write tasks are blocked unless the current workspace resolves under a trusted workspace listed in `~/.gemini/antigravity-cli/settings.json`. The trusted path check uses real paths and accepts either an exact match or a subdirectory match.
 
@@ -105,7 +107,16 @@ Passing `--write` removes `--sandbox`, but it does not auto-approve Antigravity 
 
 Review context is collected inline and capped below common shell argument limits. If staged, unstaged, base-branch, or untracked-file context is truncated, the prompt includes an explicit truncation note.
 
-Background jobs are stored under `AGY_COMPANION_DATA` when set, then `CLAUDE_PLUGIN_DATA`, then the OS temp directory.
+Background jobs are stored under `AGY_COMPANION_DATA` when set, then `CLAUDE_PLUGIN_DATA`, then the OS temp directory. Finished jobs and old agy logs are pruned automatically when a new job starts (and on demand via `/agy:prune`), keeping the data directory bounded. A corrupt job metadata file no longer breaks `status` for the other jobs.
+
+### Configuration
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `AGY_SETTINGS_PATH` | Override the Antigravity `settings.json` location | `~/.gemini/antigravity-cli/settings.json` |
+| `AGY_COMPANION_DATA` | Override where jobs and logs are stored | `CLAUDE_PLUGIN_DATA`, then OS temp dir |
+| `AGY_COMPANION_RETENTION_DAYS` | Days to keep finished jobs and logs (`<= 0` disables pruning) | `7` |
+| `AGY_STOP_REVIEW_GATE` | Enable the optional stop-review gate (Claude Code) | unset (disabled) |
 
 ## Stop-review gate (optional, Claude Code)
 

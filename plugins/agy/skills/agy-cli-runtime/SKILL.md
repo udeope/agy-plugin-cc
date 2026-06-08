@@ -13,17 +13,20 @@ The plugin delegates to `agy-companion`, which wraps the local `agy` executable.
 
 Read-only work uses `agy --print ... --sandbox`. Write work removes `--sandbox` only after trusted-workspace validation. The wrapper never passes `--dangerously-skip-permissions` unless the user explicitly provided that flag.
 
-Background jobs are stored under `${AGY_COMPANION_DATA}/jobs/<workspace-hash>/`, then `${CLAUDE_PLUGIN_DATA}/jobs/<workspace-hash>/`, then the OS temp directory.
+Background jobs are stored under `${AGY_COMPANION_DATA}/jobs/<workspace-hash>/`, then `${CLAUDE_PLUGIN_DATA}/jobs/<workspace-hash>/`, then the OS temp directory. Finished jobs and old logs past `AGY_COMPANION_RETENTION_DAYS` (default 7) are pruned automatically when a new job starts, or on demand with `agy-companion prune`.
 
 ## Commands
 
 - Setup: `agy-companion setup [--json] [--auth-check]`
 - Review: `agy-companion review [--background] [--base <ref>] [extra instructions]`
 - Adversarial review: `agy-companion adversarial-review [--background] [--base <ref>] [extra instructions]`
-- Rescue: `agy-companion rescue [--background] [--wait] [--write] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>`
+- Rescue: `agy-companion rescue [--background] [--wait] [--write|--read-only] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>`
 - Status: `agy-companion status [job-id]`
 - Result: `agy-companion result <job-id>`
 - Cancel: `agy-companion cancel <job-id>`
+- Prune: `agy-companion prune`
+
+`--read-only` forces a sandboxed run and overrides both `--write` and the write-word heuristic; use it when a task description contains words like "write" or "update" but should not change files.
 
 ## Operating rules
 
