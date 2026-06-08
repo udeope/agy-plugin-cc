@@ -12,6 +12,7 @@ import {
   normalizeTrustedWorkspaces,
   parseFlags,
   parseInvocationArgs,
+  redactArgs,
   shellSplit,
 } from '../plugins/agy/scripts/agy-companion.mjs';
 
@@ -239,6 +240,7 @@ test('OpenCode command files delegate to agy-companion', () => {
     'agy-status.md',
     'agy-result.md',
     'agy-cancel.md',
+    'agy-prune.md',
   ];
 
   for (const file of expected) {
@@ -316,6 +318,130 @@ test('stop-review-gate hook does not recurse when stop_hook_active is set', () =
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim(), '');
 });
+
+test('parseFlags recognizes --read-only', () => {
+  assert.equal(parseFlags(['--read-only', 'fix typo']).readOnly, true);
+  assert.equal(parseFlags(['--readonly', 'fix typo']).readOnly, true);
+  assert.equal(parseFlags(['fix typo']).readOnly, false);
+});
+
+test('redactArgs replaces the --print prompt with a length-only placeholder', () => {
+  const redacted = redactArgs(['--log-file', '/tmp/x.log', '--print', 'fix the secret bug', '--sandbox']);
+  assert.deepEqual(redacted, [
+    '--log-file',
+    '/tmp/x.log',
+    '--print',
+    '<redacted prompt (18 chars)>',
+    '--sandbox',
+  ]);
+  // no --print -> unchanged
+  assert.deepEqual(redactArgs(['--sandbox', '--continue']), ['--sandbox', '--continue']);
+});
+
+test('--read-only forces sandbox even for write-word tasks in untrusted workspaces', () => {
+  const untrusted = makeTempDir();
+  const home = makeHomeWithTrustedWorkspace(makeTempDir()); // trusts a different dir
+  const fakeBin = makeFakeAgyBin();
+  const env = { HOME: home, PATH: `${fakeBin}:${process.env.PATH}` };
+
+  const readOnly = runCompanion(['rescue', '--read-only', 'fix the bug'], { cwd: untrusted, env });
+  assert.equal(readOnly.status, 0);
+  assert.match(readOnly.stdout, /\[--sandbox\]/);
+
+  // Without --read-only the same write-word task is blocked by the trust gate.
+  const blocked = runCompanion(['rescue', 'fix the bug'], { cwd: untrusted, env });
+  assert.notEqual(blocked.status, 0);
+  assert.match(`${blocked.stdout}${blocked.stderr}`, /write denied/);
+});
+
+test('review fails fast with an install hint when agy is not in PATH', () => {
+  const stubBin = makeStubWhichBin();
+  const ws = makeTempDir();
+  const result = runCompanion(['review'], { cwd: ws, env: { PATH: stubBin } });
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}${result.stderr}`, /not found in PATH|agy-plugin-cc#requirements/);
+});
+
+test('status tolerates a corrupt job metadata file', () => {
+  const workspace = makeTempDir();
+  execFileSync('git', ['init'], { cwd: workspace, stdio: 'ignore' });
+  const home = makeHomeWithTrustedWorkspace(workspace);
+  const fakeBin = makeFakeAgyBin();
+  const data = makeTempDir();
+  const env = { HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, AGY_COMPANION_DATA: data };
+
+  const started = runCompanion(['review', '--background'], { cwd: workspace, env });
+  const id = started.stdout.match(/started review job ([^\n]+)/)?.[1];
+  assert.ok(id);
+
+  // Drop a broken metadata file alongside the valid one.
+  const hashDir = jobsHashDir(data);
+  fs.writeFileSync(path.join(hashDir, 'broken.json'), '{ not valid json');
+
+  const status = runCompanion(['status'], { cwd: workspace, env });
+  assert.equal(status.status, 0);
+  assert.match(status.stdout, new RegExp(id));
+});
+
+test('prune removes finished jobs past the retention window', () => {
+  const workspace = makeTempDir();
+  execFileSync('git', ['init'], { cwd: workspace, stdio: 'ignore' });
+  const home = makeHomeWithTrustedWorkspace(workspace);
+  const fakeBin = makeFakeAgyBin();
+  const data = makeTempDir();
+  const env = { HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, AGY_COMPANION_DATA: data };
+
+  const started = runCompanion(['review', '--background'], { cwd: workspace, env });
+  const id = started.stdout.match(/started review job ([^\n]+)/)?.[1];
+  assert.ok(id);
+
+  // Backdate the job and force a definitely-not-running pid so prune removes it.
+  const hashDir = jobsHashDir(data);
+  const metaPath = path.join(hashDir, `${id}.json`);
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  meta.startedAt = '2000-01-01T00:00:00.000Z';
+  meta.pid = 2147483646;
+  fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+  const pruned = runCompanion(['prune'], { cwd: workspace, env });
+  assert.equal(pruned.status, 0);
+  assert.match(pruned.stdout, /pruned 1 finished job/);
+  assert.equal(fs.existsSync(metaPath), false);
+});
+
+test('AGY_SETTINGS_PATH overrides the antigravity settings location', () => {
+  const trusted = makeTempDir();
+  const settingsDir = makeTempDir();
+  const settingsPath = path.join(settingsDir, 'custom-settings.json');
+  fs.writeFileSync(settingsPath, JSON.stringify({ trustedWorkspaces: [trusted] }, null, 2));
+  const fakeBin = makeFakeAgyBin();
+  // HOME points somewhere with no settings; the override must win.
+  const env = { HOME: makeTempDir(), PATH: `${fakeBin}:${process.env.PATH}`, AGY_SETTINGS_PATH: settingsPath };
+
+  const setup = runCompanion(['setup', '--json'], { cwd: trusted, env });
+  assert.equal(setup.status, 0);
+  const payload = JSON.parse(setup.stdout);
+  assert.equal(payload.settings.path, settingsPath);
+  assert.deepEqual(payload.settings.trustedWorkspaces, [trusted]);
+
+  // The override-defined trusted workspace also authorizes writes.
+  const write = runCompanion(['rescue', '--write', 'fix typo'], { cwd: trusted, env });
+  assert.equal(write.status, 0);
+  assert.doesNotMatch(write.stdout, /\[--sandbox\]/);
+});
+
+function jobsHashDir(data) {
+  const jobsRoot = path.join(data, 'jobs');
+  const entries = fs.readdirSync(jobsRoot);
+  assert.equal(entries.length, 1, 'expected exactly one workspace job dir');
+  return path.join(jobsRoot, entries[0]);
+}
+
+function makeStubWhichBin() {
+  const dir = makeTempDir();
+  fs.writeFileSync(path.join(dir, 'which'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  return dir;
+}
 
 function runHook(input, env = {}) {
   return spawnSync(process.execPath, [stopGateHook], {
