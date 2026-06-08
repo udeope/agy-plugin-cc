@@ -262,6 +262,17 @@ test('skills declare names and descriptions for Codex and OpenCode discovery', (
   }
 });
 
+test('rescue agent allows a relay turn so it can return companion output', () => {
+  const body = fs.readFileSync(path.join(repoRoot, 'plugins', 'agy', 'agents', 'agy-rescue.md'), 'utf8');
+  // A 1-turn forwarder spends its only turn on the Bash call and can never
+  // emit the command output, so the agent must allow at least two turns.
+  const match = body.match(/^maxTurns:\s*(\d+)\s*$/m);
+  if (match) {
+    assert.ok(Number(match[1]) >= 2, `maxTurns must be >= 2 to relay output, got ${match[1]}`);
+  }
+  assert.match(body, /agy-companion\.mjs rescue/);
+});
+
 test('stop-review-gate hook is a no-op unless the gate is enabled', () => {
   const ws = makeGitWorkspace({ dirty: true });
   const result = runHook({ cwd: ws }, {});
