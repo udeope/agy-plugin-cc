@@ -61,6 +61,7 @@ function parseFlags(args) {
     background: false,
     wait: false,
     write: false,
+    readOnly: false,
     continueConversation: false,
     conversation: null,
     base: null,
@@ -79,6 +80,7 @@ function parseFlags(args) {
     else if (arg === '--background') flags.background = true;
     else if (arg === '--wait') flags.wait = true;
     else if (arg === '--write') flags.write = true;
+    else if (arg === '--read-only' || arg === '--readonly') flags.readOnly = true;
     else if (arg === '--continue') flags.continueConversation = true;
     else if (arg === '--dangerously-skip-permissions') flags.dangerouslySkipPermissions = true;
     else if (arg === '--base') flags.base = requireValue(args, ++i, '--base');
