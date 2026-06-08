@@ -1,6 +1,6 @@
 ---
 description: Delegate a rescue task to the agy rescue subagent.
-argument-hint: "[--background] [--wait] [--write] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>"
+argument-hint: "[--background] [--wait] [--write|--read-only] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>"
 disable-model-invocation: true
 allowed-tools: Task
 ---

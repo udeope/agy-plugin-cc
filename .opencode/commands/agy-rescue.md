@@ -1,6 +1,6 @@
 ---
 description: Delegate a rescue task to the local agy CLI.
-argument-hint: "[--background] [--wait] [--write] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>"
+argument-hint: "[--background] [--wait] [--write|--read-only] [--continue] [--conversation <id>] [--dangerously-skip-permissions] <task>"
 ---
 
 Run this command from the current workspace and return stdout/stderr verbatim:
