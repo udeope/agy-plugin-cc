@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+
+### Fixed
+- `setup` now reports a meaningful `ready`/`auth` status on the first run with no flags. Previously readiness required `--auth-check`, so `/agy:setup` always returned `ready: false` / `auth: unknown` even when the user was logged in.
+- The auth smoke test no longer reports `ok` alongside a spurious `ETIMEDOUT` error: a clean `OK` reply now counts as success even when agy's background `agentapi` keeps stdio open and `spawnSync` hits its timeout.
+
+### Added
+- Offline auth detection in `setup`: the presence of the persisted OAuth token (`~/.gemini/antigravity-cli/antigravity-oauth-token`) is reported as `auth: present`/`missing` without spending a model call, so a logged-in user gets `ready: true` immediately. `--auth-check` still runs the live verified smoke test (`auth: ok`/`failed`, `verified: true`).
+- `AGY_TOKEN_PATH` to override the OAuth token location for non-default installs and tests. `setup --json` now includes `verified`, `tokenPresent`, and `tokenPath`.
+
+## 0.2.0
 
 ### Fixed
 - `redactArgs` no longer stores the full `--print` prompt in on-disk job metadata; the prompt is replaced with a length-only placeholder.

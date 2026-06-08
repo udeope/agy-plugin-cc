@@ -14,6 +14,11 @@ import { logDir } from './paths.mjs';
 const SETTINGS_PATH = process.env.AGY_SETTINGS_PATH
   ? path.resolve(process.env.AGY_SETTINGS_PATH)
   : path.join(os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
+// The Antigravity CLI persists an OAuth token next to settings.json after the
+// user logs in. Overridable (AGY_TOKEN_PATH) for non-default installs/tests.
+const TOKEN_PATH = process.env.AGY_TOKEN_PATH
+  ? path.resolve(process.env.AGY_TOKEN_PATH)
+  : path.join(path.dirname(SETTINGS_PATH), 'antigravity-oauth-token');
 const WRITE_WORDS = /\b(fix|apply|change|modify|edit|write|implement|update|patch|repair|refactor|create|delete|remove|rename)\b/i;
 const INSTALL_HINT = 'agy (Antigravity CLI) was not found in PATH. Install it and run /agy:setup. See https://github.com/udeope/agy-plugin-cc#requirements';
 
@@ -84,12 +89,34 @@ function runAuthCheck() {
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
   // Require a standalone OK, but never treat an explicit "NOT OK" as success.
   const looksOk = /\bOK\b/i.test(output) && !/\bNOT\s+OK\b/i.test(output);
+  // agy can leave its background agentapi attached to stdio after replying, so
+  // spawnSync may hit its timeout and SIGTERM the process (status null) even
+  // though the model already answered. Treat a clean OK as success in that
+  // case, and only surface an error when we did NOT get a usable answer.
+  const ok = looksOk && (result.status === 0 || result.status === null);
   return {
     status: result.status,
-    ok: result.status === 0 && looksOk,
+    ok,
     output,
-    error: result.error?.message || (result.status === 0 ? null : `exit ${result.status}`),
+    error: ok ? null : (result.error?.message || (result.status === 0 ? null : `exit ${result.status}`)),
   };
+}
+
+// Cheap, offline auth probe: the presence of a non-empty persisted OAuth token
+// is the fast equivalent of a server round-trip and lets `setup` report
+// readiness without spending a model call. Use runAuthCheck (--auth-check) for
+// a live, verified smoke test of the stored credentials.
+function readAuthState() {
+  try {
+    const stat = fs.statSync(TOKEN_PATH);
+    if (stat.isFile() && stat.size > 0) {
+      return { present: true, path: TOKEN_PATH, error: null };
+    }
+    return { present: false, path: TOKEN_PATH, error: 'token file is empty' };
+  } catch (error) {
+    const reason = error.code === 'ENOENT' ? 'not logged in (no token file); run `agy` once to authenticate' : error.message;
+    return { present: false, path: TOKEN_PATH, error: reason };
+  }
 }
 
 function assertTrustedForWrite(cwd) {
@@ -135,11 +162,13 @@ function runForeground(args) {
 export {
   INSTALL_HINT,
   SETTINGS_PATH,
+  TOKEN_PATH,
   WRITE_WORDS,
   assertTrustedForWrite,
   ensureBinaryOrThrow,
   findBinary,
   normalizeTrustedWorkspaces,
+  readAuthState,
   readSettings,
   runAuthCheck,
   runForeground,

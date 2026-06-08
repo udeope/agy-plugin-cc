@@ -13,6 +13,7 @@ import {
   ensureBinaryOrThrow,
   findBinary,
   normalizeTrustedWorkspaces,
+  readAuthState,
   readSettings,
   runAuthCheck,
   runForeground,
@@ -70,13 +71,19 @@ function setup(args) {
   const flags = parseFlags(args);
   const binary = findBinary('agy');
   const settings = readSettings();
-  let auth = { status: 'unknown', ok: false, output: null };
+  const token = readAuthState();
 
-  if (flags.authCheck) {
-    auth = runAuthCheck();
-  }
+  // Default readiness trusts the persisted OAuth token (fast, offline), so a
+  // logged-in user sees ready:true on the first `/agy:setup` with no flags.
+  // --auth-check additionally spends a live model call to verify the stored
+  // credentials actually work end-to-end.
+  const auth = flags.authCheck ? runAuthCheck() : null;
+  const authOk = flags.authCheck ? auth.ok : token.present;
+  const authStatus = flags.authCheck
+    ? (auth.ok ? 'ok' : 'failed')
+    : (token.present ? 'present' : 'missing');
 
-  const ready = Boolean(binary.ok && settings.ok && flags.authCheck && auth.ok);
+  const ready = Boolean(binary.ok && settings.ok && authOk);
   const payload = {
     ready,
     binary,
@@ -87,10 +94,13 @@ function setup(args) {
       error: settings.error,
     },
     auth: {
-      status: flags.authCheck ? (auth.ok ? 'ok' : 'failed') : 'unknown',
-      ok: flags.authCheck ? auth.ok : false,
-      output: auth.output,
-      error: auth.error,
+      status: authStatus,
+      ok: authOk,
+      verified: flags.authCheck,
+      tokenPresent: token.present,
+      tokenPath: token.path,
+      output: auth?.output ?? null,
+      error: flags.authCheck ? auth.error : token.error,
     },
   };
 

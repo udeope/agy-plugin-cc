@@ -87,13 +87,20 @@ agy-companion setup
 agy-companion setup --auth-check
 ```
 
-Without `--auth-check`, auth is reported as `unknown`. With `--auth-check`, the companion runs:
+Without `--auth-check`, auth is detected offline from the presence of the
+persisted OAuth token (`~/.gemini/antigravity-cli/antigravity-oauth-token`) and
+reported as `present` or `missing` — no model call, so a logged-in user gets
+`ready: true` on the first run. With `--auth-check`, the companion additionally
+verifies the stored credentials end-to-end by running:
 
 ```bash
 agy --print "Reply with only OK" --sandbox --print-timeout 20s
 ```
 
-`ready` is true only when the binary exists, settings are readable, and the auth smoke test passes.
+and reports auth as `ok` or `failed` (with `verified: true` in `--json`).
+
+`ready` is true when the binary exists, settings are readable, and auth is
+either present (default) or verified (`--auth-check`).
 
 ## Safety
 

@@ -441,6 +441,41 @@ test('AGY_SETTINGS_PATH overrides the antigravity settings location', () => {
   assert.doesNotMatch(write.stdout, /\[--sandbox\]/);
 });
 
+test('setup reports ready with auth present when the OAuth token exists (no --auth-check)', () => {
+  const workspace = makeTempDir();
+  const home = makeHomeWithTrustedWorkspace(workspace);
+  fs.writeFileSync(
+    path.join(home, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'),
+    'fake-oauth-token\n',
+  );
+  const fakeBin = makeFakeAgyBin();
+  const env = { HOME: home, PATH: `${fakeBin}:${process.env.PATH}` };
+
+  const setup = runCompanion(['setup', '--json'], { cwd: workspace, env });
+  assert.equal(setup.status, 0);
+  const payload = JSON.parse(setup.stdout);
+  assert.equal(payload.ready, true);
+  assert.equal(payload.auth.status, 'present');
+  assert.equal(payload.auth.ok, true);
+  assert.equal(payload.auth.verified, false);
+  assert.equal(payload.auth.tokenPresent, true);
+});
+
+test('setup reports not-ready with auth missing when no OAuth token exists', () => {
+  const workspace = makeTempDir();
+  const home = makeHomeWithTrustedWorkspace(workspace);
+  const fakeBin = makeFakeAgyBin();
+  const env = { HOME: home, PATH: `${fakeBin}:${process.env.PATH}` };
+
+  const setup = runCompanion(['setup', '--json'], { cwd: workspace, env });
+  assert.equal(setup.status, 0);
+  const payload = JSON.parse(setup.stdout);
+  assert.equal(payload.ready, false);
+  assert.equal(payload.auth.status, 'missing');
+  assert.equal(payload.auth.ok, false);
+  assert.equal(payload.auth.tokenPresent, false);
+});
+
 function jobsHashDir(data) {
   const jobsRoot = path.join(data, 'jobs');
   const entries = fs.readdirSync(jobsRoot);
