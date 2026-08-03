@@ -110,7 +110,11 @@ Read-only review and rescue tasks run with `agy --sandbox`. Write access is not 
 
 Write tasks are blocked unless the current workspace resolves under a trusted workspace listed in `~/.gemini/antigravity-cli/settings.json`. The trusted path check uses real paths and accepts either an exact match or a subdirectory match.
 
-Passing `--write` removes `--sandbox`, but it does not auto-approve Antigravity permissions. If `agy` needs approval, the task may pause, fail, or require interaction. The plugin never adds `--dangerously-skip-permissions` unless the user passes that flag literally.
+Passing `--write` removes `--sandbox`, but it does not auto-approve Antigravity permissions. If `agy` needs approval, the task may pause, fail, or require interaction. The plugin never adds `--dangerously-skip-permissions` unless the user passes that flag **as the very first argument**; anywhere else the run is refused rather than downgraded, so a misplaced flag is never mistaken for a run that still prompted for approval.
+
+Flags are only recognised before the task text (or before a `--` separator). A task that mentions a flag by name, as in "explain what the `--write` flag does", stays part of the prompt instead of becoming one.
+
+The write-verb list is English-only and matches whole words, so it both misses other languages and fires on innocent phrasing like "write a summary" — `--read-only` is the way to settle it.
 
 Review context is collected inline and capped below common shell argument limits. If staged, unstaged, base-branch, or untracked-file context is truncated, the prompt includes an explicit truncation note.
 

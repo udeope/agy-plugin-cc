@@ -15,6 +15,7 @@ import {
   redactArgs,
   shellSplit,
 } from '../plugins/agy/scripts/agy-companion.mjs';
+import { JOB_ID_PATTERN, findJob } from '../plugins/agy/scripts/lib/jobs.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const companion = path.join(repoRoot, 'plugins', 'agy', 'scripts', 'agy-companion.mjs');
@@ -40,14 +41,15 @@ test('parses Claude raw argument string and normal argv mode', () => {
 });
 
 test('extracts flags without forwarding Claude-only flags as task text', () => {
+  // The yolo flag leads: it is only honoured as the very first argument.
   const flags = parseFlags([
+    '--dangerously-skip-permissions',
     '--background',
     '--wait',
     '--write',
     '--continue',
     '--conversation',
     'thread-1',
-    '--dangerously-skip-permissions',
     'fix',
     'typo',
   ]);
@@ -143,11 +145,53 @@ test('dangerously-skip-permissions is only forwarded when explicitly provided', 
   });
   assert.doesNotMatch(normal.stdout, /dangerously-skip-permissions/);
 
-  const dangerous = runCompanion(['rescue', '--write', '--dangerously-skip-permissions', 'fix typo'], {
+  const dangerous = runCompanion(['rescue', '--dangerously-skip-permissions', '--write', 'fix typo'], {
     cwd: workspace,
     env: { HOME: home, PATH: `${fakeBin}:${process.env.PATH}` },
   });
   assert.match(dangerous.stdout, /dangerously-skip-permissions/);
+
+  // Out of position it is refused, not quietly dropped: a caller who believed
+  // permissions were skipped must not get a run that silently prompted instead.
+  const misplaced = runCompanion(['rescue', '--write', '--dangerously-skip-permissions', 'fix typo'], {
+    cwd: workspace,
+    env: { HOME: home, PATH: `${fakeBin}:${process.env.PATH}` },
+  });
+  assert.match(`${misplaced.stdout}${misplaced.stderr}`, /only accepted as the first argument/);
+});
+
+test('a task that names a flag keeps it as prompt text', () => {
+  const write = parseFlags(parseInvocationArgs(['explain what the --write flag does']));
+  assert.equal(write.write, false, 'a flag named inside the task must not be consumed');
+  assert.equal(write.positional.join(' '), 'explain what the --write flag does');
+
+  const yolo = parseFlags(parseInvocationArgs(['never use --dangerously-skip-permissions in production']));
+  assert.equal(yolo.dangerouslySkipPermissions, false);
+  assert.equal(yolo.yoloMisplaced, false, 'task text is not a misplaced flag, just text');
+  assert.equal(yolo.positional.join(' '), 'never use --dangerously-skip-permissions in production');
+});
+
+test('parseFlags treats everything after -- as positional', () => {
+  const flags = parseFlags(['--write', '--', '--background', 'text']);
+  assert.equal(flags.write, true);
+  assert.equal(flags.background, false);
+  assert.deepEqual(flags.positional, ['--background', 'text']);
+});
+
+test('findJob rejects ids that escape the job directory', () => {
+  assert.throws(() => findJob('../../../../tmp/probe'), /invalid job id/);
+  assert.throws(() => findJob('not-a-job-id'), /invalid job id/);
+  assert.match(`${Date.now()}-a1b2c3`, JOB_ID_PATTERN);
+});
+
+test('reads the invocation from stdin when --stdin is passed', () => {
+  const res = runCompanion(['status', '--stdin'], { input: 'definitely-not-a-job-id' });
+  assert.match(`${res.stdout}${res.stderr}`, /invalid job id: definitely-not-a-job-id/);
+});
+
+test('stdin invocation is not interpreted by the shell', () => {
+  const res = runCompanion(['status', '--stdin'], { input: 'status "; echo INJECTED; "' });
+  assert.doesNotMatch(`${res.stdout}${res.stderr}`, /INJECTED/);
 });
 
 test('agy invocations use companion-owned log files', () => {
@@ -521,11 +565,12 @@ function makeVerdictAgyBin(verdict) {
   return dir;
 }
 
-function runCompanion(args, { cwd, env = {} }) {
+function runCompanion(args, { cwd, env = {}, input } = {}) {
   return spawnSync(process.execPath, [companion, ...args], {
     cwd,
     env: { ...process.env, ...env },
     encoding: 'utf8',
+    input,
   });
 }
 
