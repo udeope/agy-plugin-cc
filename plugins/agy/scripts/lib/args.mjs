@@ -54,6 +54,18 @@ function shellSplit(input) {
   return out;
 }
 
+const YOLO_FLAG = '--dangerously-skip-permissions';
+
+// Flags are only recognised before the first positional token, or before an
+// explicit `--`. Everything from there on is prompt text and is passed through
+// untouched.
+//
+// Slash commands hand the whole invocation over as one string, so the task text
+// is tokenized alongside the flags. Scanning the entire token list would let a
+// task like "explain what the --write flag does" both silently leave the sandbox
+// and lose the word from the prompt the model receives. With
+// --dangerously-skip-permissions in the set, a task that merely *warns against*
+// the flag would have switched it on.
 function parseFlags(args) {
   const flags = {
     json: false,
@@ -66,15 +78,20 @@ function parseFlags(args) {
     conversation: null,
     base: null,
     dangerouslySkipPermissions: false,
+    // Set when the yolo flag appears somewhere the parser will not honour it, so
+    // callers can fail loudly instead of silently running with permissions on.
+    yoloMisplaced: false,
     positional: [],
   };
 
-  for (let i = 0; i < args.length; i += 1) {
+  let i = 0;
+  for (; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--') {
-      flags.positional.push(...args.slice(i + 1));
+      i += 1;
       break;
     }
+
     if (arg === '--json') flags.json = true;
     else if (arg === '--auth-check') flags.authCheck = true;
     else if (arg === '--background') flags.background = true;
@@ -82,14 +99,24 @@ function parseFlags(args) {
     else if (arg === '--write') flags.write = true;
     else if (arg === '--read-only' || arg === '--readonly') flags.readOnly = true;
     else if (arg === '--continue') flags.continueConversation = true;
-    else if (arg === '--dangerously-skip-permissions') flags.dangerouslySkipPermissions = true;
+    // Forwarded to agy as --dangerously-skip-permissions, which auto-approves
+    // every permission request. Recognised only as the very first token:
+    // leading-flag parsing alone already keeps it out of task text, and this
+    // second rule means no future parser change can reintroduce that reach.
+    // Anywhere else it is refused rather than ignored, so a misplaced flag is
+    // never mistaken for a run that still prompted for approval.
+    else if (arg === YOLO_FLAG) {
+      if (i === 0) flags.dangerouslySkipPermissions = true;
+      else flags.yoloMisplaced = true;
+    }
     else if (arg === '--base') flags.base = requireValue(args, ++i, '--base');
     else if (arg.startsWith('--base=')) flags.base = arg.slice('--base='.length);
     else if (arg === '--conversation') flags.conversation = requireValue(args, ++i, '--conversation');
     else if (arg.startsWith('--conversation=')) flags.conversation = arg.slice('--conversation='.length);
-    else flags.positional.push(arg);
+    else break;
   }
 
+  flags.positional = args.slice(i);
   return flags;
 }
 
@@ -100,4 +127,4 @@ function requireValue(args, index, flag) {
   return args[index];
 }
 
-export { parseFlags, parseInvocationArgs, requireValue, shellSplit };
+export { YOLO_FLAG, parseFlags, parseInvocationArgs, requireValue, shellSplit };

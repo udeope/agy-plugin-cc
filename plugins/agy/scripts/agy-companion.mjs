@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-import { parseFlags, parseInvocationArgs, shellSplit } from './lib/args.mjs';
+import { YOLO_FLAG, parseFlags, parseInvocationArgs, shellSplit } from './lib/args.mjs';
 import {
   INSTALL_HINT,
   SETTINGS_PATH,
@@ -25,6 +25,7 @@ import {
   findJob,
   isRunning,
   listJobs,
+  looksLikeJobProcess,
   printJobStatus,
   pruneJobs,
   pruneLogs,
@@ -45,9 +46,34 @@ if (invokedAsScript) {
   });
 }
 
+// Read the invocation from stdin when `--stdin` is present. Slash commands feed
+// the arguments through a quoted heredoc, so the shell never interprets what the
+// user typed: quotes, backticks and `$(...)` reach the parser as plain text.
+function readInvocation(argv) {
+  if (!argv.includes('--stdin')) {
+    return parseInvocationArgs(argv);
+  }
+  let text = '';
+  try {
+    text = fs.readFileSync(0, 'utf8').trim();
+  } catch {
+    text = '';
+  }
+  const rest = argv.filter((arg) => arg !== '--stdin');
+  return [...rest, ...(text ? parseInvocationArgs([text]) : [])];
+}
+
+// A misplaced yolo flag means the caller believed permissions were skipped while
+// the run would have prompted, or the reverse. Refuse instead of guessing.
+function assertYoloPlacement(flags) {
+  if (flags.yoloMisplaced) {
+    throw new Error(`${YOLO_FLAG} is only accepted as the first argument`);
+  }
+}
+
 async function main() {
   const action = process.argv[2] || 'help';
-  const args = parseInvocationArgs(process.argv.slice(3));
+  const args = readInvocation(process.argv.slice(3));
 
   switch (action) {
     case 'setup':
@@ -127,6 +153,7 @@ function setup(args) {
 
 async function runReview(args, adversarial) {
   const flags = parseFlags(args);
+  assertYoloPlacement(flags);
   ensureBinaryOrThrow();
   const context = buildReviewContext(flags.base);
   const extra = flags.positional.join(' ').trim();
@@ -142,6 +169,7 @@ async function runReview(args, adversarial) {
 
 async function runRescue(args) {
   const flags = parseFlags(args);
+  assertYoloPlacement(flags);
   ensureBinaryOrThrow();
   const task = flags.positional.join(' ').trim();
   if (!task && !flags.continueConversation && !flags.conversation) {
@@ -203,6 +231,10 @@ function cancel(args) {
   const { meta } = findJob(flags.positional[0]);
   if (!isRunning(meta.pid)) {
     console.log(`${meta.id} is not running`);
+    return;
+  }
+  if (!looksLikeJobProcess(meta.pid)) {
+    console.log(`${meta.id} is not running (pid ${meta.pid} now belongs to another process)`);
     return;
   }
   process.kill(meta.pid, 'SIGTERM');

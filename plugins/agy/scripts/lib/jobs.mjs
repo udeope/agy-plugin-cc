@@ -3,9 +3,14 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import { jobDir, logDir } from './paths.mjs';
+
+// Ids are minted by startJob as `<epoch-ms>-<6 hex>`. Validating on the way back
+// in keeps a caller-supplied id from escaping the job directory: `path.join`
+// happily resolves `../../elsewhere/file` into a read outside it.
+const JOB_ID_PATTERN = /^\d+-[0-9a-f]{6}$/;
 
 const DEFAULT_RETENTION_DAYS = 7;
 
@@ -102,6 +107,7 @@ function listJobs() {
 
 function findJob(id) {
   if (!id) throw new Error('job id is required');
+  if (!JOB_ID_PATTERN.test(id)) throw new Error(`invalid job id: ${id}`);
   const dir = jobDir();
   const metaPath = path.join(dir, `${id}.json`);
   if (!fs.existsSync(metaPath)) throw new Error(`job not found: ${id}`);
@@ -167,6 +173,18 @@ function pruneOldArtifacts() {
   return { jobs: pruneJobs(), logs: pruneLogs() };
 }
 
+// A finished job's pid can be recycled by the OS, and cancel would then signal
+// whatever inherited the number. Confirm the process still looks like the run we
+// started before signalling it.
+// ponytail: matches on the command line, so a *different* agy process that took
+// the same pid would still pass. Compare process start times if that ever stops
+// being good enough.
+function looksLikeJobProcess(pid) {
+  const result = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' });
+  if (result.status !== 0) return false;
+  return result.stdout.includes('agy');
+}
+
 function isRunning(pid) {
   try {
     process.kill(pid, 0);
@@ -181,8 +199,10 @@ function printJobStatus(meta) {
 }
 
 export {
+  JOB_ID_PATTERN,
   findJob,
   isRunning,
+  looksLikeJobProcess,
   listJobs,
   printJobStatus,
   pruneJobs,

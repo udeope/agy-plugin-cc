@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1
+
+Brings agy in line with the hardening already shipped in `opencode-plugin-cc`
+0.1.2 and `command-code-plugin-cc` 0.1.1.
+
+### Fixed
+- **The rescue agent sometimes answered instead of forwarding.** Its rules said what to do but never forbade solving the task directly, so on a question it found trivial it replied on its own — the caller got Sonnet's answer believing it came from agy. The rule the other two companions already carry is now present here: never answer the task yourself, however trivial it looks.
+- **A task could switch on `--dangerously-skip-permissions` by naming it.** Flags were parsed from the whole invocation, task text included, so "never use `--dangerously-skip-permissions` in production" turned the flag *on* while stripping the warning from the prompt the model received. "explain what the `--write` flag does" likewise left the sandbox. Flags are now read only before the first positional token, or before an explicit `--`.
+- `--dangerously-skip-permissions` is additionally accepted only as the very first argument, and is now **refused** anywhere else instead of silently ignored — so a misplaced flag never passes for a run that still prompted for approval.
+- Command templates pass their arguments through a quoted heredoc into `--stdin` instead of interpolating `"$ARGUMENTS"` into the shell. Quotes, backticks and `$(...)` in a task now reach the parser as plain text.
+- `status`, `result` and `cancel` validate the job id against the format `startJob` mints. `path.join` previously resolved a caller-supplied `../../elsewhere` out of the job directory, and `result` would then print any file named by the `outPath` it found there.
+- `cancel` confirms the recorded pid still belongs to an agy process before signalling it, so a recycled pid from a long-finished job is no longer a stray `SIGTERM`.
+
 ## 0.3.0
 
 ### Fixed

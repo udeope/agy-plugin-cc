@@ -8,7 +8,9 @@ allowed-tools: Bash(node *)
 Run this command from the current workspace and return stdout verbatim:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" status "$ARGUMENTS"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/agy-companion.mjs" status --stdin <<'AGY_ARGS'
+$ARGUMENTS
+AGY_ARGS
 ```
 
 Do not modify files.
