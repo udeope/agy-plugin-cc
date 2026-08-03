@@ -568,3 +568,12 @@ function restoreEnv(name, value) {
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+test('runs when invoked through a symlinked bin (npm global install)', () => {
+  const dir = makeTempDir();
+  const link = path.join(dir, 'agy-companion');
+  fs.symlinkSync(companion, link);
+  const res = spawnSync(process.execPath, [link, 'help'], { encoding: 'utf8' });
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /usage: agy-companion\.mjs/);
+});

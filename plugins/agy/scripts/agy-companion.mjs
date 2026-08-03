@@ -3,6 +3,7 @@
 // Concern-specific logic lives in ./lib/*; this file wires actions to it.
 
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 import { parseFlags, parseInvocationArgs, shellSplit } from './lib/args.mjs';
 import {
@@ -32,7 +33,12 @@ import {
 import { jobDir, logDir } from './lib/paths.mjs';
 import { buildReviewPrompt } from './lib/prompts.mjs';
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Resolve symlinks before comparing: when invoked through an npm global bin
+// symlink, argv[1] is the link path while import.meta.url is the real one.
+const invokedAsScript = process.argv[1]
+  && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href;
+
+if (invokedAsScript) {
   main().catch((error) => {
     console.error(`agy-companion: ${error.message}`);
     process.exitCode = 1;
